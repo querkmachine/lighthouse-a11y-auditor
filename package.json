@@ -1,0 +1,21 @@
+{
+  "name": "lighthouse-a11y-auditor",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "audit": "node test.js",
+    "report": "node view.js"
+  },
+  "author": "Kimberly Grey <hi@berly.kim>",
+  "license": "MIT",
+  "dependencies": {
+    "chrome-launcher": "^0.15.0",
+    "del": "^6.0.0",
+    "express": "^4.17.2",
+    "filenamify": "^5.1.0",
+    "lighthouse": "^9.3.1",
+    "yargs": "^17.3.1"
+  }
+}
