@@ -19,9 +19,16 @@ Automated tests cannot cover all aspects of accessibility compliance—a compute
 
 The Lighthouse accessibility specification does not exactly align with the WCAG specification. Use the audit as a guide, rather than confirmation that the page is accessible.
 
-Running a lot of requests against a website can result in throttling or being barred from making future requests, as it may be interpreted as a DOS attack. Pages that return HTTP errors or fail to load in time will be listed as having errored in the report, and receive an automatic score of 0. (Note that this means that testing error pages, like 404 pages, will always fail.)
+Running a lot of requests against a website can result in throttling or being barred from making future requests, as it may be interpreted as a DOS attack. Pages that return HTTP errors or fail to load in time will be listed as having errored in the report, and receive an automatic score of 0. (Note that this means that trying to test error pages, like 404 pages, will always fail.)
 
 Pages must be publicly accessible from the machine running the audit. Pages behind paywalls, login requirements, country blocks, etc. cannot be tested.
+
+### Known issues
+
+#### In case of crashes
+This program launches instances of Google Chrome in headless mode. That means Chrome is running, but is doing so as a background task, with no open windows or visible UI. If the program crashes before completion or is killed from the command line, these headless instances won't be garbage collected and will continue running. This may have side effects on machine performance or how Chrome appears to function (or doesn't).
+
+If you encounter weirdness after using this program, open up Activity Monitor (macOS) or Task Manager (Windows) and manually end all running instances of Google Chrome. 
 
 ## Distribution
 The report results cannot be read directly from the local file system due to browser security restrictions. You must view it through a web server (remote or local).
