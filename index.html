@@ -1,237 +1,384 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-	<meta charset="UTF-8">
-	<title>Accessibility audit results</title>
-	<meta name="robots" content="noindex, nofollow">
-	<script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-slate-100 text-black">
-	<div class="grid grid-cols-1 md:grid-cols-4" id="app" v-cloak>
-		<header class="md:col-span-4 flex items-center justify-between p-4 bg-slate-500 text-white">
-			<h1 class="font-extrabold text-lg">Accessibility audit results</h1>
-			{{ this.summary.date }}
-		</header>
-		<nav class="col-span-1">
-			<div class="p-4 bg-white sticky top-0">
-				<label class="block mb-3">
-					Min score of:
-					<input class="w-24 p-1 border-2" type="number" min="0" :max="filterScoreMax" step="1" v-model.number="filterScoreMin">
-				</label>
-				<label class="block mb-3">
-					Max score of:
-					<input class="w-24 p-1 border-2" type="number" :min="filterScoreMin" max="100" step="1" v-model.number="filterScoreMax">
-				</label>
-				<label class="block mb-3">
-					<input type="checkbox" v-model="filterShowErroredAudits">
-					Show errored audits
-				</label>
-				<label class="block mb-3">
-					<input type="checkbox" v-model="filterShowAllTests">
-					Show all test results, not just failures
-				</label>
-				<div class="mt-6">
-					<button type="button" @click="csvCopy" class="block w-full p-4 text-center bg-slate-600 text-white">
-						Copy table as CSV
-					</button>
-				</div>
-			</div>
-		</nav>
-		<main class="col-span-1 md:col-span-3 p-4">
-			<template v-if="!isSummaryLoaded">
-				<div class="text-center p-9">
-					Loading audit results&hellip;
-				</div>
-			</template>
-			<template v-else>
-				<table class="table-fixed w-full border-collapse border-2">
-					<thead class="sticky top-0 border-b-8 ">
-						<tr>
-							<th class="w-24 py-1 px-2 text-right align-top bg-slate-200" scope="col"><abbr title="Page audit score out of 100.">Score</abbr></th>
-							<th class="py-1 px-2 text-left align-top bg-slate-200" scope="col">URL</th>
-							<th class="w-48 py-1 px-2 text-right align-top bg-slate-200"></th>
-						</tr>
-					</thead>
-					<tbody>
-						<template v-if="!summaryFiltered.length">
-							<tr>
-								<td class="text-center p-9" colspan="3">
-									Your filters don't match anything.<br>
-									You should fix that.
-								</td>
-							</tr>
-						</template>
-						<template v-for="audit in summaryFiltered" :key="audit.name">
-							<tr :id="audit.name">
-								<td class="py-1 px-2 text-right align-top border-b" :class="styleScoreClass(audit.score, audit.error)">
-									<template v-if="audit.error">
-										ERROR
-									</template>
-									<template v-else>
-										{{ formatScore(audit.score) }}
-									</template>
-								</td>
-								<td class="py-1 px-2 text-left align-top border-b">
-									<a class="hover:text-sky-500" :href="audit.url" target="_blank" rel="noopener noreferrer">{{ audit.url }}</a>
-								</td>
-								<td class="py-1 px-2 text-right align-top border-b">
-									<button type="button" @click.once="getDetails(audit.name, audit.file)" @click="toggleDetails(audit.name)">
-										<template v-if="currentlyOpenSection === audit.name">Collapse details</template>
-										<template v-else>View details</template>
-									</button>
-								</td>
-							</tr>
-							<tr v-if="currentlyOpenSection === audit.name" class="bg-white">
-								<td colspan="3" class="border-b-8">
-									<template v-if="audit.error">
-										<div class="p-2 text-red-600">⚠️ {{ audit.error }}</div>
-									</template>
-									<template v-else-if="audit.score === 1 && !filterShowAllTests">
-										<div class="p-9 text-center text-teal-600">All tests passed! 👍</div>
-									</template>
-									<template v-else>
-										<table v-if="inDepth[audit.name]" class="table-fixed w-full border-collapse">
-											<tbody>
-												<template v-for="(test, key) in inDepth[audit.name]">
-													<template v-if="test.scoreDisplayMode === 'notApplicable' && filterShowAllTests">
-														<tr>
-															<td class="w-24 py-1 px-2 border-b align-top text-right"><abbr title="Not applicable — The page does not feature the elements relevant to this test.">N/A</abbr></td>
-															<td class="py-1 px-2 border-b align-top" v-html="marked(test.title)"></td>
-														</tr>
-													</template>
-													<template v-else-if="test.scoreDisplayMode === 'manual' && filterShowAllTests">
-														<tr>
-															<td class="w-24 py-1 px-2 border-b align-top text-right"><abbr title="Lighthouse cannot test for this. It must be checked manually.">Manual</abbr></td>
-															<td class="py-1 px-2 border-b align-top" v-html="marked(test.title)"></td>
-														</tr>
-													</template>
-													<template v-else-if="test.scoreDisplayMode === 'binary' && test.score === 1 && filterShowAllTests">
-														<tr>
-															<td class="w-24 py-1 px-2 border-b align-top text-right" :class="styleScoreClass(1, false)">Pass</td>
-															<td class="py-1 px-2 border-b align-top" v-html="marked(test.title)"></td>
-														</tr>
-													</template>
-													<template v-else-if="test.scoreDisplayMode === 'binary' && test.score === 0">
-														<tr>
-															<td rowspan="2" class="w-24 py-1 px-2 border-b align-top text-right" :class="styleScoreClass(0, true)">Fail</td>
-															<td class="py-1 px-2 align-top" v-html="marked(test.title)"></td>
-														</tr>
-														<tr>
-															<td class="py-1 px-2 border-b align-top">
-																<div v-html="marked(test.description)"></div>
-																
-																<ul class="list-decimal pl-8 mt-4" v-if="test.details && test.details.items">
-																	<li v-for="failure in test.details.items">
-																		<code>{{ failure.node.snippet }}</code>
-																	</li>
-																</ul>
-															</td>
-														</tr>
-													</template>
-												</template>
-											</tbody>
-										</table>
-										<p class="text-center p-9" v-else>Loading test results&hellip;</p>
-									</template>
-								</td>
-							</tr>
-						</template>
-					</tbody>
-					<tfoot>
-						<tr>
-							<td class="py-2 px-2 font-bold text-right align-top border-t-4">{{ formatScore(averageScore) }}</td>
-							<td class="py-2 px-2 text-left align-top border-t-4" scope="row">
-								<span class="font-bold">Average score</span><br>
-								<span class="text-sm">(excluding audits that errored or are currently hidden by filters)</span>
-							</td>
-							<td class="py-2 px-2 font-bold text-right align-top border-t-4"></td>
-						</tr>
-					</tfoot>
-				</table>
-			</template>
-		</main>
-	</div>
-	<script src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.20.0/axios.min.js" integrity="sha512-quHCp3WbBNkwLfYUMd+KwBAgpVukJu5MncuQaWXgCrfgcxCJAq/fo+oqrRKOj+UKEmyMCG3tb8RB63W+EmrOBg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-	<script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.2.30/vue.global.min.js" integrity="sha512-9l+B+sZNtrdrhFWM0UGiKsRwZctEAfW7h8Z4Ycd3tQyvis8tZCpNkxTxJ3XcCRP54VD9YQs+4PeMVi5ctdlbcw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-	<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.0.2/marked.min.js" integrity="sha512-hzyXu3u+VDu/7vpPjRKFp9w33Idx7pWWNazPm+aCMRu26yZXFCby1gn1JxevVv3LDwnSbyKrvLo3JNdi4Qx1ww==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-	<script>
-		const app = {
-			data() {
-				return {
-					filterScoreMin: 0,
-					filterScoreMax: 100,
-					filterShowErroredAudits: true,
-					filterShowAllTests: false,
-					isSummaryLoaded: false,
-					currentlyOpenSection: {},
-					summary: {},
-					inDepth: {}
-				}
-			},
-			mounted() {
-				this.getSummary();
-			},
-			methods: {
-				getSummary() {
-					axios.get('reports/summary.json').then(response => {
-						this.summary = response.data;
-						this.isSummaryLoaded = true;
-					});
-				},
-				getDetails(id, filename) {
-					axios.get(`reports/${filename}`).then(response => {
-						this.inDepth[id] = response.data.audits;
-					});
-				},
-				toggleDetails(id) {
-					this.currentlyOpenSection = (this.currentlyOpenSection === id) ? null : id;
-				},
-				formatScore(score) {
-					return score * 100;
-				},
-				styleScoreClass(score, isError) {
-					if(isError) return "text-red-600 font-bold";
-					if(score >= 0.9) { return "text-teal-600"; }
-					else if(score >= 0.7) { return "text-orange-600"; }
-					else { return "text-red-600"; }
-				},
-				csvCopy() {
-					navigator.clipboard.writeText(this.csvVersion).then(() => {
-					}).catch(err => {
-						alert("Could not copy to clipboard.")
-					})
-				},
-				marked(content) {
-					return window.marked.parse(content);
-				}
-			},
-			computed: {
-				summaryFiltered() {
-					if(!this.summary || !this.summary.summary) return [];
-					return this.summary.summary
-						.filter(item => (item.score) ? this.formatScore(item.score) >= this.filterScoreMin : true)
-						.filter(item => (item.score) ? this.formatScore(item.score) <= this.filterScoreMax : true)
-						.filter(item => (!this.filterShowErroredAudits && item.error) ? false : true);
-				},
-				averageScore() {
-					const successfulTests = this.summaryFiltered.filter(item => !item.error).length;
-					if(!successfulTests) { return 0; }
-					const average = (this.summaryFiltered.reduce((acc, item) => {
-						if(item.error) { return acc; }
-						return acc + Number(item.score) || 0
-					}, 0) / successfulTests);
-					return average.toFixed(4);
-				},
-				csvVersion() {
-					let rows = ["Score,URL"];
-					this.summaryFiltered.forEach(item => {
-						rows.push(`${this.formatScore(item.score)},${item.url}`);
-					});
-					return rows.join("\n");
-				}
-			}
-		};
-		Vue.createApp(app).mount("#app");
-	</script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Accessibility audit results</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-slate-100 text-black">
+    <div class="grid grid-cols-1 md:grid-cols-4" id="app" v-cloak>
+      <header
+        class="md:col-span-4 flex items-center justify-between p-4 bg-slate-500 text-white"
+      >
+        <h1 class="font-extrabold text-lg">Accessibility audit results</h1>
+        {{ this.summary.date }}
+      </header>
+      <nav class="col-span-1">
+        <div class="p-4 bg-white sticky top-0">
+          <label class="block mb-3">
+            Min score of:
+            <input
+              class="w-24 p-1 border-2"
+              type="number"
+              min="0"
+              :max="filterScoreMax"
+              step="1"
+              v-model.number="filterScoreMin"
+            />
+          </label>
+          <label class="block mb-3">
+            Max score of:
+            <input
+              class="w-24 p-1 border-2"
+              type="number"
+              :min="filterScoreMin"
+              max="100"
+              step="1"
+              v-model.number="filterScoreMax"
+            />
+          </label>
+          <label class="block mb-3">
+            <input type="checkbox" v-model="filterShowErroredAudits" />
+            Show errored audits
+          </label>
+          <label class="block mb-3">
+            <input type="checkbox" v-model="filterShowAllTests" />
+            Show all test results, not just failures
+          </label>
+          <div class="mt-6">
+            <button
+              type="button"
+              @click="csvCopy"
+              class="block w-full p-4 text-center bg-slate-600 text-white"
+            >
+              Copy table as CSV
+            </button>
+          </div>
+        </div>
+      </nav>
+      <main class="col-span-1 md:col-span-3 p-4">
+        <template v-if="!isSummaryLoaded">
+          <div class="text-center p-9">Loading audit results&hellip;</div>
+        </template>
+        <template v-else>
+          <table class="table-fixed w-full border-collapse border-2">
+            <thead class="sticky top-0 border-b-8">
+              <tr>
+                <th
+                  class="w-24 py-1 px-2 text-right align-top bg-slate-200"
+                  scope="col"
+                >
+                  <abbr title="Page audit score out of 100.">Score</abbr>
+                </th>
+                <th
+                  class="py-1 px-2 text-left align-top bg-slate-200"
+                  scope="col"
+                >
+                  URL
+                </th>
+                <th
+                  class="w-48 py-1 px-2 text-right align-top bg-slate-200"
+                ></th>
+              </tr>
+            </thead>
+            <tbody>
+              <template v-if="!summaryFiltered.length">
+                <tr>
+                  <td class="text-center p-9" colspan="3">
+                    Your filters don't match anything.<br />
+                    You should fix that.
+                  </td>
+                </tr>
+              </template>
+              <template v-for="audit in summaryFiltered" :key="audit.name">
+                <tr :id="audit.name">
+                  <td
+                    class="py-1 px-2 text-right align-top border-b"
+                    :class="styleScoreClass(audit.score, audit.error)"
+                  >
+                    <template v-if="audit.error"> ERROR </template>
+                    <template v-else> {{ formatScore(audit.score) }} </template>
+                  </td>
+                  <td class="py-1 px-2 text-left align-top border-b">
+                    <a
+                      class="hover:text-sky-500"
+                      :href="audit.url"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      >{{ audit.url }}</a
+                    >
+                  </td>
+                  <td class="py-1 px-2 text-right align-top border-b">
+                    <button
+                      type="button"
+                      @click.once="getDetails(audit.name, audit.file)"
+                      @click="toggleDetails(audit.name)"
+                    >
+                      <template v-if="currentlyOpenSection === audit.name"
+                        >Collapse details</template
+                      >
+                      <template v-else>View details</template>
+                    </button>
+                  </td>
+                </tr>
+                <tr v-if="currentlyOpenSection === audit.name" class="bg-white">
+                  <td colspan="3" class="border-b-8">
+                    <template v-if="audit.error">
+                      <div class="p-2 text-red-600">⚠️ {{ audit.error }}</div>
+                    </template>
+                    <template
+                      v-else-if="audit.score === 1 && !filterShowAllTests"
+                    >
+                      <div class="p-9 text-center text-teal-600">
+                        All tests passed! 👍
+                      </div>
+                    </template>
+                    <template v-else>
+                      <table
+                        v-if="inDepth[audit.name]"
+                        class="table-fixed w-full border-collapse"
+                      >
+                        <tbody>
+                          <template v-for="(test, key) in inDepth[audit.name]">
+                            <template
+                              v-if="test.scoreDisplayMode === 'notApplicable' && filterShowAllTests"
+                            >
+                              <tr>
+                                <td
+                                  class="w-24 py-1 px-2 border-b align-top text-right"
+                                >
+                                  <abbr
+                                    title="Not applicable — The page does not feature the elements relevant to this test."
+                                    >N/A</abbr
+                                  >
+                                </td>
+                                <td
+                                  class="py-1 px-2 border-b align-top"
+                                  v-html="marked(test.title)"
+                                ></td>
+                              </tr>
+                            </template>
+                            <template
+                              v-else-if="test.scoreDisplayMode === 'manual' && filterShowAllTests"
+                            >
+                              <tr>
+                                <td
+                                  class="w-24 py-1 px-2 border-b align-top text-right"
+                                >
+                                  <abbr
+                                    title="Lighthouse cannot test for this. It must be checked manually."
+                                    >Manual</abbr
+                                  >
+                                </td>
+                                <td
+                                  class="py-1 px-2 border-b align-top"
+                                  v-html="marked(test.title)"
+                                ></td>
+                              </tr>
+                            </template>
+                            <template
+                              v-else-if="test.scoreDisplayMode === 'binary' && test.score === 1 && filterShowAllTests"
+                            >
+                              <tr>
+                                <td
+                                  class="w-24 py-1 px-2 border-b align-top text-right"
+                                  :class="styleScoreClass(1, false)"
+                                >
+                                  Pass
+                                </td>
+                                <td
+                                  class="py-1 px-2 border-b align-top"
+                                  v-html="marked(test.title)"
+                                ></td>
+                              </tr>
+                            </template>
+                            <template
+                              v-else-if="test.scoreDisplayMode === 'binary' && test.score === 0"
+                            >
+                              <tr>
+                                <td
+                                  rowspan="2"
+                                  class="w-24 py-1 px-2 border-b align-top text-right"
+                                  :class="styleScoreClass(0, true)"
+                                >
+                                  Fail
+                                </td>
+                                <td
+                                  class="py-1 px-2 align-top"
+                                  v-html="marked(test.title)"
+                                ></td>
+                              </tr>
+                              <tr>
+                                <td class="py-1 px-2 border-b align-top">
+                                  <div v-html="marked(test.description)"></div>
+
+                                  <ul
+                                    class="list-decimal pl-8 mt-4"
+                                    v-if="test.details && test.details.items"
+                                  >
+                                    <li v-for="failure in test.details.items">
+                                      <code>{{ failure.node.snippet }}</code>
+                                    </li>
+                                  </ul>
+                                </td>
+                              </tr>
+                            </template>
+                          </template>
+                        </tbody>
+                      </table>
+                      <p class="text-center p-9" v-else>
+                        Loading test results&hellip;
+                      </p>
+                    </template>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+            <tfoot>
+              <tr>
+                <td class="py-2 px-2 font-bold text-right align-top border-t-4">
+                  {{ formatScore(averageScore) }}
+                </td>
+                <td
+                  class="py-2 px-2 text-left align-top border-t-4"
+                  scope="row"
+                >
+                  <span class="font-bold">Average score</span><br />
+                  <span class="text-sm"
+                    >(excluding audits that errored or are currently hidden by
+                    filters)</span
+                  >
+                </td>
+                <td
+                  class="py-2 px-2 font-bold text-right align-top border-t-4"
+                ></td>
+              </tr>
+            </tfoot>
+          </table>
+        </template>
+      </main>
+    </div>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.20.0/axios.min.js"
+      integrity="sha512-quHCp3WbBNkwLfYUMd+KwBAgpVukJu5MncuQaWXgCrfgcxCJAq/fo+oqrRKOj+UKEmyMCG3tb8RB63W+EmrOBg=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.2.30/vue.global.min.js"
+      integrity="sha512-9l+B+sZNtrdrhFWM0UGiKsRwZctEAfW7h8Z4Ycd3tQyvis8tZCpNkxTxJ3XcCRP54VD9YQs+4PeMVi5ctdlbcw=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.0.2/marked.min.js"
+      integrity="sha512-hzyXu3u+VDu/7vpPjRKFp9w33Idx7pWWNazPm+aCMRu26yZXFCby1gn1JxevVv3LDwnSbyKrvLo3JNdi4Qx1ww=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+    <script>
+      const app = {
+        data() {
+          return {
+            filterScoreMin: 0,
+            filterScoreMax: 100,
+            filterShowErroredAudits: true,
+            filterShowAllTests: false,
+            isSummaryLoaded: false,
+            currentlyOpenSection: {},
+            summary: {},
+            inDepth: {},
+          };
+        },
+        mounted() {
+          this.getSummary();
+        },
+        methods: {
+          getSummary() {
+            axios.get("reports/summary.json").then((response) => {
+              this.summary = response.data;
+              this.isSummaryLoaded = true;
+            });
+          },
+          getDetails(id, filename) {
+            axios.get(`reports/${filename}`).then((response) => {
+              this.inDepth[id] = response.data.audits;
+            });
+          },
+          toggleDetails(id) {
+            this.currentlyOpenSection =
+              this.currentlyOpenSection === id ? null : id;
+          },
+          formatScore(score) {
+            return score * 100;
+          },
+          styleScoreClass(score, isError) {
+            if (isError) return "text-red-600 font-bold";
+            if (score >= 0.9) {
+              return "text-teal-600";
+            } else if (score >= 0.7) {
+              return "text-orange-600";
+            } else {
+              return "text-red-600";
+            }
+          },
+          csvCopy() {
+            navigator.clipboard
+              .writeText(this.csvVersion)
+              .then(() => {})
+              .catch((err) => {
+                alert("Could not copy to clipboard.");
+              });
+          },
+          marked(content) {
+            return window.marked.parse(content);
+          },
+        },
+        computed: {
+          summaryFiltered() {
+            if (!this.summary || !this.summary.summary) return [];
+            return this.summary.summary
+              .filter((item) =>
+                item.score
+                  ? this.formatScore(item.score) >= this.filterScoreMin
+                  : true
+              )
+              .filter((item) =>
+                item.score
+                  ? this.formatScore(item.score) <= this.filterScoreMax
+                  : true
+              )
+              .filter((item) =>
+                !this.filterShowErroredAudits && item.error ? false : true
+              );
+          },
+          averageScore() {
+            const successfulTests = this.summaryFiltered.filter(
+              (item) => !item.error
+            ).length;
+            if (!successfulTests) {
+              return 0;
+            }
+            const average =
+              this.summaryFiltered.reduce((acc, item) => {
+                if (item.error) {
+                  return acc;
+                }
+                return acc + Number(item.score) || 0;
+              }, 0) / successfulTests;
+            return average.toFixed(4);
+          },
+          csvVersion() {
+            let rows = ["Score,URL"];
+            this.summaryFiltered.forEach((item) => {
+              rows.push(`${this.formatScore(item.score)},${item.url}`);
+            });
+            return rows.join("\n");
+          },
+        },
+      };
+      Vue.createApp(app).mount("#app");
+    </script>
+  </body>
 </html>
